@@ -4,26 +4,33 @@ import pandas as pd
 # 1. Configuração da página e CSS para Impressão
 st.set_page_config(page_title="Relatório de Acessos - Completo", layout="wide")
 
-# CSS para esconder elementos desnecessários na hora de imprimir
+# CSS para esconder elementos desnecessários na hora de imprimir e forçar visibilidade das tabelas
 st.markdown("""
     <style>
     @media print {
-        header, [data-testid="stSidebar"], .stButton, [data-testid="stFileUploader"], .stDownloadButton, footer {
+        /* Esconde elementos do Streamlit */
+        header, [data-testid="stSidebar"], .stButton, [data-testid="stFileUploader"], .stDownloadButton, footer, .stMarkdown button {
             display: none !important;
         }
+        /* Garante que o conteúdo use a página inteira */
         .main .block-container {
             padding-top: 1rem !important;
             padding-bottom: 1rem !important;
+            max-width: 100% !important;
         }
+        /* Evita quebras de página no meio de tabelas */
+        table { page-break-inside: auto; }
+        tr { page-break-inside: avoid; page-break-after: auto; }
     }
     </style>
 """, unsafe_allow_html=True)
 
 st.title("📊 Painel de Movimentação e Auditoria")
 
-# Botão de Impressão
-if st.button("🖨️ Abrir Opções de Impressão"):
-    st.markdown("<script>window.print();</script>", unsafe_allow_html=True)
+# --- BOTÃO DE IMPRESSÃO CORRIGIDO ---
+# Usando um link HTML estilizado como botão para maior compatibilidade
+st.markdown('<button onclick="window.print()" style="background-color: #ff4b4b; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">🖨️ CLIQUE AQUI PARA IMPRIMIR</button>', unsafe_allow_html=True)
+st.write("") # Espaçamento
 
 uploaded_file = st.file_uploader("Carregue a planilha CSV", type="csv")
 
@@ -76,32 +83,28 @@ if uploaded_file is not None:
             st.error("Erro: Colunas DATA e HORA não encontradas.")
             st.stop()
 
-        # --- EXIBIÇÃO DE MÉTRICAS GERAIS ---
+        # --- EXIBIÇÃO ---
         st.write(f"**Relatório gerado em:** {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}")
         
         col_m1, col_m2 = st.columns(2)
-        col_m1.metric("Unidades com Movimentação Única (Normal)", len(relatorio_normal))
+        col_m1.metric("Unidades com Movimentação Única", len(relatorio_normal))
         col_m2.metric("Total de Entradas Inconsistentes", len(relatorio_inconsistente))
 
         st.divider()
 
-        # --- SEÇÃO 1: NORMAL (COM CONTADORES DE TIPO) ---
+        # --- SEÇÃO 1: NORMAL ---
         st.subheader("🏠 Movimentações Únicas Validadas")
         if len(relatorio_normal) > 0:
-            # Reativando o contador de Moradores/Visitantes
             if 'TIPO' in relatorio_normal.columns:
                 contagem_tipo = relatorio_normal['TIPO'].value_counts()
                 cols_t = st.columns(max(len(contagem_tipo), 2))
                 for i, (tipo, total) in enumerate(contagem_tipo.items()):
                     cols_t[i].metric(f"Unid. com {tipo}", total)
             
-            # Tabela Normal (st.table para sair inteira na impressão)
             df_normal_view = relatorio_normal[['UNIDADES', 'TIPO', 'PESSOA', 'DATA', 'HORA']].rename(
                 columns={'UNIDADES': 'Unidade', 'TIPO': 'Categoria', 'PESSOA': 'Nome'}
             ).sort_values('Unidade')
             st.table(df_normal_view)
-        else:
-            st.info("Nenhuma movimentação normal encontrada.")
 
         st.divider()
 
@@ -121,5 +124,3 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
-else:
-    st.info("Aguardando upload do CSV.")
