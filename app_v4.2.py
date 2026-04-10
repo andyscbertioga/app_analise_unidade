@@ -1,66 +1,47 @@
 import streamlit as st
 import pandas as pd
 
-# 1. Configuração da página e CSS para Impressão
-st.set_page_config(page_title="Relatório de Acessos - Completo", layout="wide")
-
-# CSS para esconder elementos desnecessários na hora de imprimir e forçar visibilidade das tabelas
-st.markdown("""
-    <style>
-    @media print {
-        /* Esconde elementos do Streamlit */
-        header, [data-testid="stSidebar"], .stButton, [data-testid="stFileUploader"], .stDownloadButton, footer, .stMarkdown button {
-            display: none !important;
-        }
-        /* Garante que o conteúdo use a página inteira */
-        .main .block-container {
-            padding-top: 1rem !important;
-            padding-bottom: 1rem !important;
-            max-width: 100% !important;
-        }
-        /* Evita quebras de página no meio de tabelas */
-        table { page-break-inside: auto; }
-        tr { page-break-inside: avoid; page-break-after: auto; }
-    }
-    </style>
-""", unsafe_allow_html=True)
+# Configuração da página
+st.set_page_config(page_title="Gestão de Acessos e Auditoria", layout="wide")
 
 st.title("📊 Painel de Movimentação e Auditoria")
+st.markdown("Ferramenta configurada para análise de Moradores e Visitantes com auditoria de Aberturas Remotas.")
 
-# --- BOTÃO DE IMPRESSÃO CORRIGIDO ---
-# Usando um link HTML estilizado como botão para maior compatibilidade
-st.markdown('<button onclick="window.print()" style="background-color: #ff4b4b; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">🖨️ CLIQUE AQUI PARA IMPRIMIR</button>', unsafe_allow_html=True)
-st.write("") # Espaçamento
-
-uploaded_file = st.file_uploader("Carregue a planilha CSV", type="csv")
+uploaded_file = st.file_uploader("Carregue a planilha CSV externa", type="csv")
 
 if uploaded_file is not None:
     try:
-        # 1. Carregamento e Padronização
+        # 1. Leitura e Padronização de Colunas
         df = pd.read_csv(uploaded_file)
-        df.columns = df.columns.str.strip().str.upper()
+        df.columns = df.columns.str.strip().str.upper() # Tudo para MAIÚSCULO para evitar erros
         
+        # Limpeza de espaços nos dados
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip()
 
-        # --- FILTROS DE INTEGRIDADE ---
+        # --- VERIFICAÇÃO DE COLUNAS VITAIS ---
         if 'PESSOA' not in df.columns or 'UNIDADES' not in df.columns:
-            st.error("Erro: Colunas 'PESSOA' ou 'UNIDADES' não encontradas.")
+            st.error("Erro: Colunas 'PESSOA' ou 'UNIDADES' não encontradas no CSV.")
             st.stop()
 
+        # --- FILTROS DE INTEGRIDADE E REGRAS DE NEGÓCIO ---
+        # 1. Remove registros sem Nome ou Unidade
         df = df[~df['PESSOA'].isin(['', 'nan', 'None', 'N/A'])]
         df = df[~df['UNIDADES'].isin(['', 'nan', 'None', 'N/A'])]
         
+        # 2. Ignora Tipos específicos
         if 'TIPO' in df.columns:
             df = df[~df['TIPO'].isin(['Funcionário', 'Prestador de serviço'])]
         
+        # 3. Remove Unidades Administrativas
         unidades_bloqueadas = ["BEACH HOUSE RESTAURANTE", "ADM ADM, ADMINISTRAÇÃO ALLTIME"]
         df = df[~df['UNIDADES'].isin(unidades_bloqueadas)]
 
+        # 4. Apenas Acessos Autorizados
         if 'SITUAÇÃO' in df.columns:
             df = df[df['SITUAÇÃO'].str.contains('autorizada', case=False)].copy()
 
-        # --- SEGREGAÇÃO DE INCONSISTÊNCIAS ---
+        # --- SEGREGAÇÃO DE INCONSISTÊNCIAS (ABERTURA REMOTA) ---
         possiveis_nomes_abertura = ['TIPO DE ABERTURA', 'TIPO ABERTURA', 'ABERTURA']
         col_abertura_encontrada = next((c for c in possiveis_nomes_abertura if c in df.columns), None)
 
@@ -72,7 +53,7 @@ if uploaded_file is not None:
             df_inconsistentes = pd.DataFrame(columns=df.columns)
             df_normal = df.copy()
 
-        # --- PROCESSAMENTO ---
+        # --- PROCESSAMENTO CRONOLÓGICO ---
         if 'DATA' in df.columns and 'HORA' in df.columns:
             df_normal['Timestamp'] = pd.to_datetime(df_normal['DATA'] + ' ' + df_normal['HORA'], dayfirst=True)
             relatorio_normal = df_normal.sort_values(by='Timestamp', ascending=False).drop_duplicates(subset='UNIDADES', keep='first')
@@ -80,20 +61,18 @@ if uploaded_file is not None:
             df_inconsistentes['Timestamp'] = pd.to_datetime(df_inconsistentes['DATA'] + ' ' + df_inconsistentes['HORA'], dayfirst=True)
             relatorio_inconsistente = df_inconsistentes.sort_values(by='Timestamp', ascending=False)
         else:
-            st.error("Erro: Colunas DATA e HORA não encontradas.")
+            st.error("Erro: Colunas de DATA e HORA não encontradas.")
             st.stop()
 
-        # --- EXIBIÇÃO ---
-        st.write(f"**Relatório gerado em:** {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}")
-        
-        col_m1, col_m2 = st.columns(2)
-        col_m1.metric("Unidades com Movimentação Única", len(relatorio_normal))
-        col_m2.metric("Total de Entradas Inconsistentes", len(relatorio_inconsistente))
+        # --- EXIBIÇÃO DE RESULTADOS ---
+        c1, c2 = st.columns(2)
+        c1.metric("Unidades com Movimentação Normal", len(relatorio_normal))
+        c2.metric("Total de Entradas Inconsistentes", len(relatorio_inconsistente))
 
         st.divider()
 
-        # --- SEÇÃO 1: NORMAL ---
-        st.subheader("🏠 Movimentações Únicas Validadas")
+        # SEÇÃO 1: MOVIMENTAÇÃO NORMAL
+        st.subheader("🏠 Movimentações Únicas Validadas (Morador/Visitante)")
         if len(relatorio_normal) > 0:
             if 'TIPO' in relatorio_normal.columns:
                 contagem_tipo = relatorio_normal['TIPO'].value_counts()
@@ -101,26 +80,39 @@ if uploaded_file is not None:
                 for i, (tipo, total) in enumerate(contagem_tipo.items()):
                     cols_t[i].metric(f"Unid. com {tipo}", total)
             
-            df_normal_view = relatorio_normal[['UNIDADES', 'TIPO', 'PESSOA', 'DATA', 'HORA']].rename(
-                columns={'UNIDADES': 'Unidade', 'TIPO': 'Categoria', 'PESSOA': 'Nome'}
-            ).sort_values('Unidade')
-            st.table(df_normal_view)
+            st.dataframe(
+                relatorio_normal[['UNIDADES', 'TIPO', 'PESSOA', 'DATA', 'HORA']].rename(
+                    columns={'UNIDADES': 'Unidade', 'TIPO': 'Categoria', 'PESSOA': 'Nome'}
+                ).sort_values('Unidade'),
+                use_container_width=True, hide_index=True
+            )
 
         st.divider()
 
-        # --- SEÇÃO 2: INCONSISTÊNCIAS ---
-        st.subheader("⚠️ Relatório de Entradas Inconsistentes")
-        if len(relatorio_inconsistente) > 0:
-            cols_auditoria = ['UNIDADES', 'PESSOA', 'DATA', 'HORA']
-            if col_abertura_encontrada: cols_auditoria.append(col_abertura_encontrada)
-            if 'ZONA' in relatorio_inconsistente.columns: cols_auditoria.append('ZONA')
+        # SEÇÃO 2: INCONSISTÊNCIAS (AUDITORIA)
+        st.subheader("⚠️ Auditoria de Entradas Inconsistentes")
+        if not col_abertura_encontrada:
+            st.info("ℹ️ Auditoria desativada: Coluna de 'Tipo de abertura' não detectada no arquivo.")
+        elif len(relatorio_inconsistente) > 0:
+            st.warning(f"Foram encontradas {len(relatorio_inconsistente)} aberturas remotas.")
             
-            df_inc_view = relatorio_inconsistente[cols_auditoria].rename(
-                columns={'UNIDADES': 'Unidade', 'PESSOA': 'Nome'}
+            cols_auditoria = ['UNIDADES', 'PESSOA', 'DATA', 'HORA', col_abertura_encontrada]
+            if 'ZONA' in relatorio_inconsistente.columns:
+                cols_auditoria.append('ZONA')
+            
+            st.dataframe(
+                relatorio_inconsistente[cols_auditoria].rename(
+                    columns={'UNIDADES': 'Unidade', 'PESSOA': 'Nome', col_abertura_encontrada: 'Tipo de Acesso'}
+                ),
+                use_container_width=True, hide_index=True
             )
-            st.table(df_inc_view)
+            
+            csv_inc = relatorio_inconsistente.to_csv(index=False).encode('utf-8-sig')
+            st.download_button("📥 Baixar Relatório de Inconsistências", csv_inc, "auditoria_remota.csv", "text/csv")
         else:
-            st.success("Nenhuma abertura remota detectada.")
+            st.success("Nenhuma abertura remota detectada no arquivo carregado.")
 
     except Exception as e:
-        st.error(f"Erro no processamento: {e}")
+        st.error(f"Erro inesperado ao processar os dados: {e}")
+else:
+    st.info("Aguardando upload do arquivo CSV para iniciar.")
