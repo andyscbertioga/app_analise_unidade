@@ -2,17 +2,15 @@ import streamlit as st
 import pandas as pd
 
 # 1. Configuração da página e CSS para Impressão
-st.set_page_config(page_title="Relatório de Acessos - Impressão", layout="wide")
+st.set_page_config(page_title="Relatório de Acessos - Completo", layout="wide")
 
 # CSS para esconder elementos desnecessários na hora de imprimir
 st.markdown("""
     <style>
     @media print {
-        /* Esconde botões, cabeçalho e menus do Streamlit */
         header, [data-testid="stSidebar"], .stButton, [data-testid="stFileUploader"], .stDownloadButton, footer {
             display: none !important;
         }
-        /* Ajusta o container principal para usar todo o papel */
         .main .block-container {
             padding-top: 1rem !important;
             padding-bottom: 1rem !important;
@@ -40,7 +38,7 @@ if uploaded_file is not None:
 
         # --- FILTROS DE INTEGRIDADE ---
         if 'PESSOA' not in df.columns or 'UNIDADES' not in df.columns:
-            st.error("Erro: Colunas 'PESSOA' ou 'UNIDADES' não encontradas no arquivo.")
+            st.error("Erro: Colunas 'PESSOA' ou 'UNIDADES' não encontradas.")
             st.stop()
 
         df = df[~df['PESSOA'].isin(['', 'nan', 'None', 'N/A'])]
@@ -78,27 +76,36 @@ if uploaded_file is not None:
             st.error("Erro: Colunas DATA e HORA não encontradas.")
             st.stop()
 
-        # --- EXIBIÇÃO ---
+        # --- EXIBIÇÃO DE MÉTRICAS GERAIS ---
         st.write(f"**Relatório gerado em:** {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}")
         
-        c1, c2 = st.columns(2)
-        c1.metric("Unidades com Movimentação Única", len(relatorio_normal))
-        c2.metric("Total de Entradas Inconsistentes", len(relatorio_inconsistente))
+        col_m1, col_m2 = st.columns(2)
+        col_m1.metric("Unidades com Movimentação Única (Normal)", len(relatorio_normal))
+        col_m2.metric("Total de Entradas Inconsistentes", len(relatorio_inconsistente))
 
         st.divider()
 
-        # SEÇÃO 1: NORMAL
+        # --- SEÇÃO 1: NORMAL (COM CONTADORES DE TIPO) ---
         st.subheader("🏠 Movimentações Únicas Validadas")
         if len(relatorio_normal) > 0:
-            # Usamos st.table para garantir que tudo apareça impresso sem barras de rolagem
+            # Reativando o contador de Moradores/Visitantes
+            if 'TIPO' in relatorio_normal.columns:
+                contagem_tipo = relatorio_normal['TIPO'].value_counts()
+                cols_t = st.columns(max(len(contagem_tipo), 2))
+                for i, (tipo, total) in enumerate(contagem_tipo.items()):
+                    cols_t[i].metric(f"Unid. com {tipo}", total)
+            
+            # Tabela Normal (st.table para sair inteira na impressão)
             df_normal_view = relatorio_normal[['UNIDADES', 'TIPO', 'PESSOA', 'DATA', 'HORA']].rename(
                 columns={'UNIDADES': 'Unidade', 'TIPO': 'Categoria', 'PESSOA': 'Nome'}
             ).sort_values('Unidade')
             st.table(df_normal_view)
+        else:
+            st.info("Nenhuma movimentação normal encontrada.")
 
         st.divider()
 
-        # SEÇÃO 2: INCONSISTÊNCIAS
+        # --- SEÇÃO 2: INCONSISTÊNCIAS ---
         st.subheader("⚠️ Relatório de Entradas Inconsistentes")
         if len(relatorio_inconsistente) > 0:
             cols_auditoria = ['UNIDADES', 'PESSOA', 'DATA', 'HORA']
@@ -115,4 +122,4 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Erro no processamento: {e}")
 else:
-    st.info("Aguardando upload do CSV para gerar relatórios e opção de impressão.")
+    st.info("Aguardando upload do CSV.")
