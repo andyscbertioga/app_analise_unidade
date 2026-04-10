@@ -4,33 +4,34 @@ import pandas as pd
 # 1. Configuração da página e CSS para Impressão
 st.set_page_config(page_title="Relatório de Acessos - Impressão", layout="wide")
 
-# CSS para esconder elementos do Streamlit na hora de imprimir
+# CSS para esconder elementos desnecessários na hora de imprimir
 st.markdown("""
     <style>
     @media print {
-        /* Esconde botões, header e menus do Streamlit */
-        header, [data-testid="stSidebar"], .stButton, [data-testid="stFileUploader"], .stDownloadButton {
+        /* Esconde botões, cabeçalho e menus do Streamlit */
+        header, [data-testid="stSidebar"], .stButton, [data-testid="stFileUploader"], .stDownloadButton, footer {
             display: none !important;
         }
-        /* Ajusta o layout para ocupar a página inteira */
+        /* Ajusta o container principal para usar todo o papel */
         .main .block-container {
-            padding: 0 !important;
-            margin: 0 !important;
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
         }
     }
     </style>
-""", unsafe_allow_stdio=True)
+""", unsafe_allow_html=True)
 
 st.title("📊 Painel de Movimentação e Auditoria")
 
-# Botão de Impressão nativo do browser
-if st.button("🖨️ Imprimir Relatórios"):
+# Botão de Impressão
+if st.button("🖨️ Abrir Opções de Impressão"):
     st.markdown("<script>window.print();</script>", unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("Carregue a planilha CSV", type="csv")
 
 if uploaded_file is not None:
     try:
+        # 1. Carregamento e Padronização
         df = pd.read_csv(uploaded_file)
         df.columns = df.columns.str.strip().str.upper()
         
@@ -39,7 +40,7 @@ if uploaded_file is not None:
 
         # --- FILTROS DE INTEGRIDADE ---
         if 'PESSOA' not in df.columns or 'UNIDADES' not in df.columns:
-            st.error("Erro: Colunas 'PESSOA' ou 'UNIDADES' não encontradas.")
+            st.error("Erro: Colunas 'PESSOA' ou 'UNIDADES' não encontradas no arquivo.")
             st.stop()
 
         df = df[~df['PESSOA'].isin(['', 'nan', 'None', 'N/A'])]
@@ -67,17 +68,21 @@ if uploaded_file is not None:
             df_normal = df.copy()
 
         # --- PROCESSAMENTO ---
-        df_normal['Timestamp'] = pd.to_datetime(df_normal['DATA'] + ' ' + df_normal['HORA'], dayfirst=True)
-        relatorio_normal = df_normal.sort_values(by='Timestamp', ascending=False).drop_duplicates(subset='UNIDADES', keep='first')
-        
-        df_inconsistentes['Timestamp'] = pd.to_datetime(df_inconsistentes['DATA'] + ' ' + df_inconsistentes['HORA'], dayfirst=True)
-        relatorio_inconsistente = df_inconsistentes.sort_values(by='Timestamp', ascending=False)
+        if 'DATA' in df.columns and 'HORA' in df.columns:
+            df_normal['Timestamp'] = pd.to_datetime(df_normal['DATA'] + ' ' + df_normal['HORA'], dayfirst=True)
+            relatorio_normal = df_normal.sort_values(by='Timestamp', ascending=False).drop_duplicates(subset='UNIDADES', keep='first')
+            
+            df_inconsistentes['Timestamp'] = pd.to_datetime(df_inconsistentes['DATA'] + ' ' + df_inconsistentes['HORA'], dayfirst=True)
+            relatorio_inconsistente = df_inconsistentes.sort_values(by='Timestamp', ascending=False)
+        else:
+            st.error("Erro: Colunas DATA e HORA não encontradas.")
+            st.stop()
 
         # --- EXIBIÇÃO ---
-        st.write(f"**Data do Relatório:** {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}")
+        st.write(f"**Relatório gerado em:** {pd.Timestamp.now().strftime('%d/%m/%Y %H:%M')}")
         
         c1, c2 = st.columns(2)
-        c1.metric("Unidades com Movimentação Normal", len(relatorio_normal))
+        c1.metric("Unidades com Movimentação Única", len(relatorio_normal))
         c2.metric("Total de Entradas Inconsistentes", len(relatorio_inconsistente))
 
         st.divider()
@@ -85,25 +90,29 @@ if uploaded_file is not None:
         # SEÇÃO 1: NORMAL
         st.subheader("🏠 Movimentações Únicas Validadas")
         if len(relatorio_normal) > 0:
-            # Usamos st.table para impressão pois o st.dataframe cria barras de rolagem que cortam no papel
-            st.table(relatorio_normal[['UNIDADES', 'TIPO', 'PESSOA', 'DATA', 'HORA']].rename(
+            # Usamos st.table para garantir que tudo apareça impresso sem barras de rolagem
+            df_normal_view = relatorio_normal[['UNIDADES', 'TIPO', 'PESSOA', 'DATA', 'HORA']].rename(
                 columns={'UNIDADES': 'Unidade', 'TIPO': 'Categoria', 'PESSOA': 'Nome'}
-            ).sort_values('Unidade'))
+            ).sort_values('Unidade')
+            st.table(df_normal_view)
 
         st.divider()
 
         # SEÇÃO 2: INCONSISTÊNCIAS
-        st.subheader("⚠️ Auditoria de Entradas Inconsistentes")
+        st.subheader("⚠️ Relatório de Entradas Inconsistentes")
         if len(relatorio_inconsistente) > 0:
-            cols_auditoria = ['UNIDADES', 'PESSOA', 'DATA', 'HORA', col_abertura_encontrada]
-            if 'ZONA' in relatorio_inconsistente.columns:
-                cols_auditoria.append('ZONA')
+            cols_auditoria = ['UNIDADES', 'PESSOA', 'DATA', 'HORA']
+            if col_abertura_encontrada: cols_auditoria.append(col_abertura_encontrada)
+            if 'ZONA' in relatorio_inconsistente.columns: cols_auditoria.append('ZONA')
             
-            st.table(relatorio_inconsistente[cols_auditoria].rename(
-                columns={'UNIDADES': 'Unidade', 'PESSOA': 'Nome', col_abertura_encontrada: 'Tipo de Acesso'}
-            ))
+            df_inc_view = relatorio_inconsistente[cols_auditoria].rename(
+                columns={'UNIDADES': 'Unidade', 'PESSOA': 'Nome'}
+            )
+            st.table(df_inc_view)
         else:
-            st.write("Nenhuma inconsistência detectada.")
+            st.success("Nenhuma abertura remota detectada.")
 
     except Exception as e:
-        st.error(f"Erro: {e}")
+        st.error(f"Erro no processamento: {e}")
+else:
+    st.info("Aguardando upload do CSV para gerar relatórios e opção de impressão.")
